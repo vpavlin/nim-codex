@@ -200,3 +200,29 @@ task libstorageStatic, "Generate bindings":
 
   let name = "libstorage"
   buildLibrary name, "library/", params, "static"
+
+### Mobile Android (fetch-only libstorage). Mirrors the Logos Delivery buildMobileAndroid, minus the
+### waku-only bits (RLN, discv5-waku id). Nim's android cfg only sets `cc = clang`, so the NDK clang++
+### wrappers are passed explicitly (C++ deps leveldb/boringssl compile inline via {.compile.} pragmas).
+proc buildStorageAndroid(srcDir = "./library", params = "") =
+  let cpu = getEnv("CPU", "arm64")
+  let abiDir = getEnv("ABIDIR", "arm64-v8a")
+  let cc = getEnv("NDK_CLANG")
+  let cxx = getEnv("NDK_CLANGXX")
+  let outDir = "build/android/" & abiDir
+  if not dirExists outDir:
+    mkDir outDir
+  exec "nim c --out:" & outDir & "/libstorage.so" &
+    " --threads:on --app:lib --opt:size --noMain --mm:refc --header --d:metrics" &
+    " --nimMainPrefix:libstorage -d:noSignalHandler" &
+    " -d:chronicles_runtime_filtering -d:chronicles_log_level=ERROR -d:chronicles_sinks=textlines[dynamic]" &
+    " -d:chronosEventEngine=epoll --os:android -d:androidNDK --cpu:" & cpu &
+    " --clang.exe:" & cc & " --clang.linkerexe:" & cxx &
+    " --clang.cpp.exe:" & cxx & " --clang.cpp.linkerexe:" & cxx &
+    " --passL:-L" & outDir & " --passL:-llog " & params &
+    " " & srcDir & "/libstorage.nim"
+
+task libStorageAndroid, "Build the fetch-only libstorage for Android (arm64)":
+  # disableMarchNative: drop desktop's -march=native (invalid cross-compiling).
+  # disable_libbacktrace: skip the native backtrace lib (not needed on mobile).
+  buildStorageAndroid "./library", "-d:disableMarchNative -d:disable_libbacktrace"
