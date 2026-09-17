@@ -34,10 +34,14 @@ int main(int argc,char**argv){
   const char *cid = argc>1 ? argv[1] : "zDvZRwzmAZ35ys1juAVEMsss158X5M3QfPMnwHdPbEMfiTdQkqWu";
   extern void libstorageNimMain(void); libstorageNimMain();
   const char *lvl = getenv("LOGLEVEL"); if(!lvl) lvl="INFO";
-  char cfg[512];
+  const char *extip = getenv("EXTIP");
+  const char *boot = getenv("BOOTSTRAP");  // PRIVATE mode: bootstrap off this SPR instead of logos.test
+  char cfg[1024], natfld[128]="", netfld[600]="\"network\":\"logos.test\",";
+  if (extip && *extip) snprintf(natfld, sizeof(natfld), "\"nat\":\"extip:%s\",", extip);
+  if (boot && *boot) snprintf(netfld, sizeof(netfld), "\"bootstrap-node\":[\"%s\"],", boot); // omit network → private
   snprintf(cfg,sizeof(cfg),
-    "{\"log-level\":\"%s\",\"data-dir\":\"%s/.storage-fetcher\",\"network\":\"logos.test\","
-    "\"listen-ip\":\"0.0.0.0\",\"listen-port\":8071}", lvl, getenv("HOME"));
+    "{\"log-level\":\"%s\",%s%s\"data-dir\":\"%s/.storage-fetcher\","
+    "\"listen-ip\":\"0.0.0.0\",\"listen-port\":8071}", lvl, natfld, netfld, getenv("HOME"));
   Resp*r=ra();
   void*ctx=storage_new(cfg,(StorageCallback)cb,r);
   if(!ctx){ fprintf(stderr,"storage_new failed\n"); return 1; }
