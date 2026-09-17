@@ -41,9 +41,14 @@ int main(void){
   extern void libstorageNimMain(void); libstorageNimMain();
   char cfg[512];
   const char *lvl = getenv("LOGLEVEL"); if(!lvl) lvl = "INFO";  // set LOGLEVEL=DEBUG/TRACE to see blockexc
+  const char *extip = getenv("EXTIP");  // set EXTIP=<LAN/mesh ip> to declare reachability (bypass AutoNAT) so we ADVERTISE
+  const char *noboot = getenv("NOBOOT"); // PRIVATE mode: no public network, be the root of a private DHT
+  char natfld[128] = "", netfld[256] = "\"network\":\"logos.test\",";
+  if (extip && *extip) snprintf(natfld, sizeof(natfld), "\"nat\":\"extip:%s\",", extip);
+  if (noboot && *noboot) snprintf(netfld, sizeof(netfld), "\"no-bootstrap-node\":true,"); // omit network → private
   snprintf(cfg,sizeof(cfg),
-    "{\"log-level\":\"%s\",\"data-dir\":\"%s/.codex-seeder\",\"network\":\"logos.test\","
-    "\"listen-ip\":\"0.0.0.0\",\"listen-port\":%d}", lvl, getenv("HOME"), LISTEN_PORT);
+    "{\"log-level\":\"%s\",%s%s\"data-dir\":\"%s/.codex-seeder\","
+    "\"listen-ip\":\"0.0.0.0\",\"listen-port\":%d}", lvl, natfld, netfld, getenv("HOME"), LISTEN_PORT);
   Resp*r=ra();
   void*ctx=storage_new(cfg,(StorageCallback)cb,r);
   if(!ctx){ fprintf(stderr,"storage_new failed\n"); return 1; }
