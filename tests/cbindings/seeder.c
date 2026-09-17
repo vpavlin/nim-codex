@@ -40,9 +40,10 @@ static char* call1(int (*fn)(void*,StorageCallback,void*), void*ctx, int*ok){
 int main(void){
   extern void libstorageNimMain(void); libstorageNimMain();
   char cfg[512];
+  const char *lvl = getenv("LOGLEVEL"); if(!lvl) lvl = "INFO";  // set LOGLEVEL=DEBUG/TRACE to see blockexc
   snprintf(cfg,sizeof(cfg),
-    "{\"log-level\":\"INFO\",\"data-dir\":\"%s/.codex-seeder\",\"network\":\"logos.test\","
-    "\"listen-ip\":\"0.0.0.0\",\"listen-port\":%d}", getenv("HOME"), LISTEN_PORT);
+    "{\"log-level\":\"%s\",\"data-dir\":\"%s/.codex-seeder\",\"network\":\"logos.test\","
+    "\"listen-ip\":\"0.0.0.0\",\"listen-port\":%d}", lvl, getenv("HOME"), LISTEN_PORT);
   Resp*r=ra();
   void*ctx=storage_new(cfg,(StorageCallback)cb,r);
   if(!ctx){ fprintf(stderr,"storage_new failed\n"); return 1; }
