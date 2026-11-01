@@ -84,12 +84,14 @@ proc evictPeer*(self: BlockExcContext, peer: PeerId) =
 proc addRequestedPeer*(self: BlockExcContext, peerId: PeerId) =
   self.requestedPeers.incl(peerId)
 
-proc admitRequestedPeers*(self: BlockExcContext, swarm: Swarm) =
+proc admitRequestedPeers*(self: BlockExcContext, swarm: Swarm): seq[PeerId] =
+  ## Returns the peers that joined the swarm.
   var candidates = self.requestedPeers.toSeq().filterIt(swarm.getPeer(it).isNone)
   shuffle(candidates)
   for peerId in candidates:
     if not swarm.addPeer(peerId, BlockAvailability.unknown()):
       break
+    result.add(peerId)
 
 proc recordDialFailure*(self: BlockExcContext, peerId: PeerId) =
   self.dialFailures[peerId] = Moment.now()
