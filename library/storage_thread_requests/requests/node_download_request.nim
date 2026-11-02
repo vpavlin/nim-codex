@@ -24,7 +24,11 @@ import ../../../storage/storagetypes
 import ../../../storage/downloadtransport
 
 from ../../../storage/storage import StorageServer, node
-from ../../../storage/node import retrieve, fetchManifest
+from ../../../storage/node import retrieve, fetchManifest, engine, blockStore
+from ../../../storage/blockexchange import cancelDownload
+from ../../../storage/manifest import treeCid
+from ../../../storage/stores/blockstore import hasBlock
+import pkg/questionable/results
 from ../../../storage/rest/json import `%`, RestContent
 from libp2p import Cid, init, `$`
 
@@ -283,16 +287,36 @@ proc stream(
 
   return ok("")
 
+proc cancelNetworkDownload(storage: ptr StorageServer, cid: Cid) {.async: (raises: []).} =
+  ## Stops the block exchange download of the dataset behind `cid` (the background
+  ## fetch that `storage_fetch` starts, and any stream's), not just the session's
+  ## stream. Without it the dataset kept downloading after a cancel. Only a manifest
+  ## already in the local store is used: a cancel never goes to the network.
+  try:
+    let node = storage[].node
+    let local = await node.blockStore.hasBlock(cid)
+    if local.isErr or not local.get():
+      return
+    without manifest =? (await node.fetchManifest(cid, advertise = false)), err:
+      warn "Cancel: no manifest", cid = $cid, error = err.msg
+      return
+    node.engine.cancelDownload(manifest.treeCid)
+  except CancelledError:
+    discard
+  except CatchableError as e:
+    warn "Failed to cancel the network download", cid = $cid, error = e.msg
+
 proc cancel(
     storage: ptr StorageServer, cCid: cstring
 ): Future[Result[string, string]] {.async: (raises: []).} =
-  ## Cancel the download session identified by cid.
-  ## This operation is not supported when using the stream mode,
-  ## because the worker will be busy downloading the file.
+  ## Cancel the download of cid: closes its download session (if any) and stops
+  ## the network download of its dataset, including a background fetch.
 
   let cid = Cid.init($cCid)
   if cid.isErr:
     return err("Failed to cancel : cannot parse cid: " & $cCid)
+
+  await cancelNetworkDownload(storage, cid.get())
 
   if not downloadSessions.sessions.contains($cid):
     # The session is already cancelled
