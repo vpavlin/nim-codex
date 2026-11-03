@@ -2,6 +2,7 @@
 
 ## This file contains the P2p request type that will be handled.
 ## CONNECT: connect to a peer with the provided peer ID and optional addresses.
+## DISCONNECT_ALL: close every open connection (after the device changed networks).
 
 import std/[options]
 import chronos
@@ -17,6 +18,7 @@ logScope:
 
 type NodeP2PMsgType* = enum
   CONNECT
+  DISCONNECT_ALL
 
 type NodeP2PRequest* = object
   operation: NodeP2PMsgType
@@ -99,6 +101,24 @@ proc connect(
 
   return ok("")
 
+proc disconnectAll(
+    storage: ptr StorageServer
+): Future[Result[string, string]] {.async: (raises: []).} =
+  ## A phone that moves from Wi-Fi to mobile data keeps its old TCP connections in the
+  ## switch: they look open, block requests go into them, and nothing fails until the
+  ## kernel gives up on retransmits (15-30 min). Dropping them all makes the next request
+  ## dial afresh over the new network.
+  let sw = storage[].node.switch
+  if sw.isNil:
+    return err("Failed to disconnect: no switch.")
+  let peers = sw.connectedPeers()
+  for p in peers:
+    try:
+      await sw.disconnect(p)
+    except CancelledError:
+      return err("Failed to disconnect: operation cancelled.")
+  return ok($peers.len)
+
 proc process*(
     self: ptr NodeP2PRequest, storage: ptr StorageServer
 ): Future[Result[string, string]] {.async: (raises: []).} =
@@ -121,5 +141,11 @@ proc process*(
     let res = (await connect(storage, self.peerId, peerAddresses))
     if res.isErr:
       error "Failed to CONNECT.", error = res.error
+      return err($res.error)
+    return res
+  of NodeP2PMsgType.DISCONNECT_ALL:
+    let res = (await disconnectAll(storage))
+    if res.isErr:
+      error "Failed to DISCONNECT_ALL.", error = res.error
       return err($res.error)
     return res

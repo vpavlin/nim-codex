@@ -258,6 +258,19 @@ proc storage_connect(
 
   return callback.okOrError(res, userData)
 
+proc storage_disconnect_all(
+    ctx: ptr StorageContext, callback: StorageCallback, userData: pointer
+): cint {.dynlib, exportc.} =
+  initializeLibrary()
+  checkLibstorageParams(ctx, callback, userData)
+
+  let reqContent = NodeP2PRequest.createShared(NodeP2PMsgType.DISCONNECT_ALL)
+  let res = storage_context.sendRequestToStorageThread(
+    ctx, RequestType.P2P, reqContent, callback, userData
+  )
+
+  return callback.okOrError(res, userData)
+
 proc storage_peer_debug(
     ctx: ptr StorageContext,
     peerId: cstring,

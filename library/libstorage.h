@@ -152,6 +152,14 @@ extern "C"
         StorageCallback callback,
         void *userData);
 
+    // Close every open peer connection (call after the device changed networks:
+    // connections over the old network look open until TCP gives up). Returns the
+    // number of peers that were connected.
+    int storage_disconnect_all(
+        void *ctx,
+        StorageCallback callback,
+        void *userData);
+
     // Request debug information for a given peer ID.
     // This api is only available if the library was compiled with
     // `storage_enable_api_debug_peers` argument.
