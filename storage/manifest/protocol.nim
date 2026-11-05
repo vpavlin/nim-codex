@@ -9,6 +9,8 @@
 
 {.push raises: [].}
 
+import std/sets
+
 import pkg/chronos
 import pkg/libp2p
 import pkg/questionable
@@ -173,6 +175,29 @@ proc fetchManifestFromPeer(
     if not conn.isNil:
       await conn.close()
 
+proc tryFetchFrom(
+    self: ManifestProtocol, peer: PeerRecord, cid: Cid, transport: PeerTransport
+): Future[?!bt.Block] {.async: (raises: [CancelledError]).} =
+  let fetchFut = self.fetchManifestFromPeer(peer, cid, transport)
+  if not (await fetchFut.withTimeout(self.fetchTimeout)):
+    trace "Manifest fetch from peer timed out", cid, peer = peer.peerId
+    return failure("Manifest fetch from peer " & $peer.peerId & " timed out")
+
+  without blk =? (await fetchFut), fetchErr:
+    trace "Failed to fetch manifest from peer",
+      cid, peer = peer.peerId, err = fetchErr.msg
+    return failure(fetchErr)
+
+  return success blk
+
+proc storeFetched(
+    self: ManifestProtocol, blk: bt.Block, advertise: bool
+): Future[?!Manifest] {.async: (raises: [CancelledError]).} =
+  without manifest =? (await storeManifestBlock(self.localStore, blk, advertise)),
+    storeErr:
+    return failure("Unable to store manifest: " & storeErr.msg)
+  return success manifest
+
 proc fetchManifest*(
     self: ManifestProtocol, cid: Cid, advertise: bool, transport: PeerTransport
 ): Future[?!Manifest] {.async: (raises: [CancelledError]).} =
@@ -201,31 +226,30 @@ proc fetchManifest*(
         # evals to empty provider list
         @[]
 
-      if providers.len > 0:
-        for provider in providers:
-          let fetchFut = self.fetchManifestFromPeer(provider, cid, transport)
+      var tried = initHashSet[PeerId]()
+      for provider in providers:
+        tried.incl(provider.peerId)
+        without blk =? await self.tryFetchFrom(provider, cid, transport), fetchErr:
+          lastErr = fetchErr
+          continue
+        return await self.storeFetched(blk, advertise)
 
-          var blkResult: ?!bt.Block
-          if (await fetchFut.withTimeout(self.fetchTimeout)):
-            blkResult = await fetchFut
-          else:
-            trace "Manifest fetch from peer timed out", cid, peer = provider.peerId
+      if providers.len == 0:
+        trace "No providers found for manifest", cid, attempt
+
+      # The DHT may not list a peer that has the manifest (its announcements
+      # can lag or be capped), so ask the peers we are already connected to.
+      # They serve it only if they advertise it. Not over Mix: dialing peers
+      # directly would defeat the point of that transport.
+      if transport.kind == DownloadTransport.Direct:
+        for peer in self.discovery.connectedPeerRecords():
+          if peer.peerId in tried:
             continue
-
-          without blk =? blkResult, fetchErr:
-            trace "Failed to fetch manifest from peer",
-              cid, peer = provider.peerId, err = fetchErr.msg
+          without blk =? await self.tryFetchFrom(peer, cid, transport), fetchErr:
             lastErr = fetchErr
             continue
-
-          without manifest =? (
-            await storeManifestBlock(self.localStore, blk, advertise)
-          ), storeErr:
-            return failure("Unable to store manifest: " & storeErr.msg)
-
-          return success manifest
-      else:
-        trace "No providers found for manifest, will retry", cid, attempt
+          debug "Manifest fetched from a connected peer", cid, peer = peer.peerId
+          return await self.storeFetched(blk, advertise)
 
       if attempt < self.retries - 1:
         await sleepAsync(self.retryDelay)

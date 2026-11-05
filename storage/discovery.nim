@@ -42,6 +42,12 @@ const
   ProvideTimeout = 1.minutes
   LookupTimeout = 1.minutes
 
+  # libp2p's Kademlia keeps 500 of each by default. A node that advertises more
+  # manifests than that only announces the ~500 it re-provided last, so the
+  # rest cannot be found. Both tables live in memory and are small per entry.
+  StorageProvidedKeyCapacity* = 20000
+  StorageProviderRecordCapacity* = 20000
+
 type
   Discovery* = ref object of RootObj
     kad*: KadDHT # libp2p Kademlia DHT
@@ -159,6 +165,17 @@ method provide*(d: Discovery, cid: Cid) {.async: (raises: [CancelledError]), bas
   except CatchableError as exc:
     warn "Error providing block", cid, exc = exc.msg
 
+method connectedPeerRecords*(
+    d: Discovery
+): seq[PeerRecord] {.base, gcsafe, raises: [].} =
+  ## Peers we hold a connection to (either direction), without addresses:
+  ## dialing them reuses the existing connection.
+  if d.switch.isNil:
+    return
+  for peerId in d.switch.connectedPeers():
+    if peerId != d.peerId:
+      result.add(PeerRecord.init(peerId, newSeq[MultiAddress](), seqNo = 0))
+
 method stopProviding*(d: Discovery, cid: Cid) {.base, gcsafe, raises: [].} =
   ## Stop announcing a block Cid
   ##
@@ -238,7 +255,11 @@ proc new*(
   self.kad = KadDHT.new(
     switch,
     bootstrapNodes = @bootstrapNodes,
-    config = KadDHTConfig.new(addressPolicy = addressPolicy),
+    config = KadDHTConfig.new(
+      addressPolicy = addressPolicy,
+      providerRecordCapacity = StorageProviderRecordCapacity,
+      providedKeyCapacity = StorageProvidedKeyCapacity,
+    ),
     rng = storage_rng.libp2pRng(storage_rng.Rng.instance()),
     isServer = isServer,
   )

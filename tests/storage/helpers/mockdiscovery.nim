@@ -21,6 +21,8 @@ type MockDiscovery* = ref object of Discovery
   publishBlockProvideHandler*:
     proc(d: MockDiscovery, cid: Cid): Future[void] {.async: (raises: [CancelledError]).}
 
+  connectedPeers*: seq[PeerRecord]
+
 proc new*(T: type MockDiscovery): MockDiscovery =
   MockDiscovery()
 
@@ -46,6 +48,9 @@ method provide*(
     return
 
   await d.publishBlockProvideHandler(d, cid)
+
+method connectedPeerRecords*(d: MockDiscovery): seq[PeerRecord] {.gcsafe, raises: [].} =
+  d.connectedPeers
 
 method stopProviding*(d: MockDiscovery, cid: Cid) {.gcsafe, raises: [].} =
   discard

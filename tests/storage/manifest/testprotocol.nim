@@ -19,6 +19,7 @@ asyncchecksuite "Manifest protocol":
     clientStore: BlockStore
     clientProto: ManifestProtocol
     clientTransport: PeerTransport
+    discovery: MockDiscovery
   let
     manifest = Manifest.new(
       treeCid = Cid.example, blockSize = 123.NBytes, datasetSize = 234.NBytes
@@ -32,7 +33,7 @@ asyncchecksuite "Manifest protocol":
     serverStore = CacheStore.new()
     clientStore = CacheStore.new()
 
-    let discovery = MockDiscovery.new()
+    discovery = MockDiscovery.new()
     discovery.findBlockProvidersHandler = proc(
         d: MockDiscovery, cid: Cid, useMix: bool = false
     ): Future[seq[PeerRecord]] {.async: (raises: [CancelledError]).} =
@@ -78,6 +79,55 @@ asyncchecksuite "Manifest protocol":
 
   test "Should not serve a manifest that is not advertised":
     (await serverStore.setAdvertise(manifestBlk.cid, false)).tryGet()
+
+    check (
+      await clientProto.fetchManifest(
+        manifestBlk.cid, advertise = true, transport = clientTransport
+      )
+    ).isErr
+
+  test "Should fetch from a connected peer when the DHT lists no provider":
+    discovery.findBlockProvidersHandler = proc(
+        d: MockDiscovery, cid: Cid, useMix: bool = false
+    ): Future[seq[PeerRecord]] {.async: (raises: [CancelledError]).} =
+      return @[]
+    await clientSwitch.connect(
+      serverSwitch.peerInfo.peerId, serverSwitch.peerInfo.addrs
+    )
+    discovery.connectedPeers =
+      @[PeerRecord.init(serverSwitch.peerInfo.peerId, @[], seqNo = 0)]
+
+    let fetched = (
+      await clientProto.fetchManifest(
+        manifestBlk.cid, advertise = true, transport = clientTransport
+      )
+    ).tryGet()
+
+    check fetched.treeCid == manifest.treeCid
+
+  test "Should fail with no providers and no connected peers":
+    discovery.findBlockProvidersHandler = proc(
+        d: MockDiscovery, cid: Cid, useMix: bool = false
+    ): Future[seq[PeerRecord]] {.async: (raises: [CancelledError]).} =
+      return @[]
+
+    check (
+      await clientProto.fetchManifest(
+        manifestBlk.cid, advertise = true, transport = clientTransport
+      )
+    ).isErr
+
+  test "Should not fetch from a connected peer that does not advertise it":
+    discovery.findBlockProvidersHandler = proc(
+        d: MockDiscovery, cid: Cid, useMix: bool = false
+    ): Future[seq[PeerRecord]] {.async: (raises: [CancelledError]).} =
+      return @[]
+    (await serverStore.setAdvertise(manifestBlk.cid, false)).tryGet()
+    await clientSwitch.connect(
+      serverSwitch.peerInfo.peerId, serverSwitch.peerInfo.addrs
+    )
+    discovery.connectedPeers =
+      @[PeerRecord.init(serverSwitch.peerInfo.peerId, @[], seqNo = 0)]
 
     check (
       await clientProto.fetchManifest(
